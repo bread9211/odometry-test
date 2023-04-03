@@ -4,15 +4,15 @@ class Odometry {
     public:
         double DriveGearRatio;
 
-        pros::ADIEncoder LeftEncoder;
+        pros::ADIEncoder* LeftEncoder;
         double LeftTrackingDistance;
         double LeftEncoderRatio;
 
-        pros::ADIEncoder RightEncoder;
+        pros::ADIEncoder* RightEncoder;
         double RightTrackingDistance;
         double RightEncoderRatio;
 
-        pros::ADIEncoder BackEncoder;
+        pros::ADIEncoder* BackEncoder;
         double BackTrackingDistance;
         double BackEncoderRatio;
 
@@ -31,9 +31,9 @@ class Odometry {
 
         Odometry(
             double driveGearRatio, 
-            pros::ADIEncoder leftEncoder, 
-            pros::ADIEncoder rightEncoder, 
-            pros::ADIEncoder backEncoder, 
+            pros::ADIEncoder* leftEncoder, 
+            pros::ADIEncoder* rightEncoder, 
+            pros::ADIEncoder* backEncoder, 
             double leftTrackingDistance,
             double rightTrackingDistance,
             double backTrackingDistance,
@@ -60,9 +60,9 @@ class Odometry {
         void update() {
             // https://thepilons.ca/wp-content/uploads/2018/10/Tracking.pdf
 
-            currentLeftReading = LeftEncoder.get_value();
-            currentRightReading = RightEncoder.get_value();
-            currentBackReading = BackEncoder.get_value();
+            currentLeftReading = LeftEncoder -> get_value();
+            currentRightReading = RightEncoder -> get_value();
+            currentBackReading = BackEncoder -> get_value();
 
             double changeInLeft = currentLeftReading - oldLeftReading;
             double changeInRight = currentRightReading - oldRightReading;
