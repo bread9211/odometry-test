@@ -121,7 +121,15 @@ class Drive {
                     } else 
                         pidIntegral = 0;
 
-                    
+                    pidDerivative = pidError - pidLastError;
+                    pidLastError  = pidError;
+
+                    pidDrive = (kP * pidError) + (kI * pidIntegral) + (kD * pidDerivative);
+
+                    if( pidDrive > 127 )
+                        pidDrive = 127;
+                    if( pidDrive < -127 )
+                        pidDrive = -127;
                 }
             }
         }
