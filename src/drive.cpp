@@ -1,4 +1,4 @@
-#include <main.h>
+#include "main.h"
 
 #define vector2 std::vector<double>
 
@@ -10,7 +10,7 @@ typedef struct {
     double kD;
 } pidArgs;
 
-class Drive {
+class Drivetrain {
     public:
         // Drivetrain
 
@@ -21,8 +21,7 @@ class Drive {
         // PID
 
         double targetPID;
-
-        bool pidActive;
+        double targetAnglePID;
 
         // Odometry
 
@@ -51,7 +50,7 @@ class Drive {
 
         double lastResetOrientation;
 
-        Drive(
+        Drivetrain(
             pros::MotorGroup* LeftMotors,
             pros::MotorGroup* RightMotors,
             double DriveGearRatio,
@@ -91,7 +90,9 @@ class Drive {
         }
 
         void initOdometry() {
-            pros::Task OdometryTask(updateOdometry, "OdomTask");
+            pros::Task OdometryTask([this]() -> void {
+                this -> updateOdometry();
+            }, "OdometryTask");
         }
 
         void turnToPoint(vector2 target) {
@@ -100,36 +101,72 @@ class Drive {
 
     private:
         void updatePID(double kP, double kI, double kD) {
-            double  pidError;
-            double  pidDerivative;
-            double  pidDrive;
+            typedef struct pidVars  {
+                bool pidActive = false;
+                double pidError;
+                double pidDerivative;
+                double pidDrive;
 
-            double pidLastError = 0;
-            double pidIntegral = 0;
+                double pidLastError = 0;
+                double pidIntegral = 0;
+
+                double targetPID;
+            } pidVars;
+            
+            pidVars LeftPID;
+            pidVars RightPID;
 
             while (true) {
-                if (pidActive) {
+                if (LeftPID.pidActive) {
                     int32_t avgEncoderReading = (currentLeftReading+currentRightReading) / 2;
 
-                    double error = avgEncoderReading - targetPID;
+                    double error = avgEncoderReading - LeftPID.targetPID;
 
                     if (kI != 0) {
                         if( abs(error) < PID_INTEGRAL_LIMIT )
-                            pidIntegral += error;
+                            LeftPID.pidIntegral += error;
                         else
-                            pidIntegral = 0;
+                            LeftPID.pidIntegral = 0;
                     } else 
-                        pidIntegral = 0;
+                        LeftPID.pidIntegral = 0;
 
-                    pidDerivative = pidError - pidLastError;
-                    pidLastError  = pidError;
+                    LeftPID.pidDerivative = LeftPID.pidError - LeftPID.pidLastError;
+                    LeftPID.pidLastError  = LeftPID.pidError;
 
-                    pidDrive = (kP * pidError) + (kI * pidIntegral) + (kD * pidDerivative);
+                    LeftPID.pidDrive = (kP * LeftPID.pidError) + (kI * LeftPID.pidIntegral) + (kD * LeftPID.pidDerivative);
 
-                    if( pidDrive > 127 )
-                        pidDrive = 127;
-                    if( pidDrive < -127 )
-                        pidDrive = -127;
+                    if (LeftPID.pidDrive > 127)
+                        LeftPID.pidDrive = 127;
+                    if (LeftPID.pidDrive < -127)
+                        LeftPID.pidDrive = -127;
+
+                    LeftMotors->move(LeftPID.pidDrive);
+                }
+
+                if (RightPID.pidActive) {
+                    int32_t avgEncoderReading = (currentLeftReading+currentRightReading) / 2;
+
+                    double error = avgEncoderReading - RightPID.targetPID;
+
+                    if (kI != 0) {
+                        if( abs(error) < PID_INTEGRAL_LIMIT )
+                            RightPID.pidIntegral += error;
+                        else
+                            RightPID.pidIntegral = 0;
+                    } else 
+                        RightPID.pidIntegral = 0;
+
+                    RightPID.pidDerivative = RightPID.pidError - RightPID.pidLastError;
+                    RightPID.pidLastError  = RightPID.pidError;
+
+                    RightPID.pidDrive = (kP * RightPID.pidError) + (kI * RightPID.pidIntegral) + (kD * RightPID.pidDerivative);
+
+                    if (RightPID.pidDrive > 127)
+                        RightPID.pidDrive = 127;
+                    if (RightPID.pidDrive < -127)
+                        RightPID.pidDrive = -127;
+
+                    RightMotors->move(RightPID.pidDrive);
                 }
             }
         }
