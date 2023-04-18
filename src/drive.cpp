@@ -1,14 +1,25 @@
 #include "main.h"
 
-#define vector2 std::vector<double>
-
 #define PID_INTEGRAL_LIMIT 50
 
-typedef struct {
-    double kP;
-    double kI;
-    double kD;
-} pidArgs;
+typedef struct pidVars  {
+    bool pidActive = true;
+    double pidError;
+    double pidDerivative;
+    double pidDrive;
+
+    double pidLastError = 0;
+    double pidIntegral = 0;
+
+    double targetPID;
+
+    double maxSpeed = 127;
+} pidVars;
+
+typedef struct vector2 {
+    double x = 0;
+    double y = 0;
+} vector2;
 
 class Drivetrain {
     public:
@@ -17,11 +28,14 @@ class Drivetrain {
         pros::MotorGroup* LeftMotors;
         pros::MotorGroup* RightMotors;
         double DriveGearRatio;
+        double WheelDistance;
 
         // PID
+            
+        pidVars LeftPID;
+        pidVars RightPID;
 
-        double targetPID;
-        double targetAnglePID;
+        double PIDSpeed;
 
         // Odometry
 
@@ -37,7 +51,7 @@ class Drivetrain {
         double BackTrackingDistance;
         double BackEncoderScale;
 
-        std::vector<double> position;
+        vector2 position;
         double orientation;
 
         int32_t oldLeftReading;
@@ -50,10 +64,16 @@ class Drivetrain {
 
         double lastResetOrientation;
 
+        bool PIDActive = false;
+        double kP, kI, kD;
+
+        bool OdometryActive = false;
+
         Drivetrain(
             pros::MotorGroup* LeftMotors,
             pros::MotorGroup* RightMotors,
             double DriveGearRatio,
+            double WheelDistance,
             
             pros::ADIEncoder* LeftEncoder, 
             pros::ADIEncoder* RightEncoder, 
@@ -69,6 +89,7 @@ class Drivetrain {
             this -> LeftMotors = LeftMotors;
             this -> RightMotors = RightMotors;
             this -> DriveGearRatio = DriveGearRatio;
+            this -> WheelDistance = WheelDistance;
             this -> LeftEncoder = LeftEncoder;
             this -> RightEncoder = RightEncoder;
             this -> BackEncoder = BackEncoder;
@@ -81,46 +102,79 @@ class Drivetrain {
 
             this -> lastResetOrientation = StartOrientation;
             this -> orientation = StartOrientation;
+
+            pros::Task SensorUpdateTask([this]() -> void {
+                this -> update();
+            }, "SensorUpdateTask");
         }
 
         void initPID(double kP, double kI, double kD) {
-            pros::Task PIDTask([this, kP, kI, kD] {
-                this -> updatePID(kP, kI, kD);
-            }, "PIDTask");
+            this -> kP = kP;
+            this -> kI = kI;
+            this -> kP = kD;
+
+            PIDActive = true;
         }
 
         void initOdometry() {
-            pros::Task OdometryTask([this]() -> void {
-                this -> updateOdometry();
-            }, "OdometryTask");
+            OdometryActive = true;
         }
 
-        void turnToPoint(vector2 target) {
+        void move(double distance, double speed, bool waitForCompletion = true) {
+            LeftPID.targetPID = distance / DriveGearRatio;
+            LeftPID.maxSpeed = speed;
+            RightPID.targetPID = distance / DriveGearRatio;
+            RightPID.maxSpeed = speed;
 
+            if (waitForCompletion) {
+                do {
+                    pros::delay(1);
+                } while (LeftPID.pidActive && RightPID.pidActive);
+            }
+        }
+
+        void turn(double angle, double speed, bool waitForCompletion = true) {
+            LeftPID.targetPID = sin(angle) * WheelDistance;
+            LeftPID.maxSpeed = speed;
+            RightPID.targetPID = -sin(angle) * WheelDistance;
+            RightPID.maxSpeed = speed;
+
+            if (waitForCompletion) {
+                do {
+                    pros::delay(1);
+                } while (LeftPID.pidActive && RightPID.pidActive);
+            }
+        }
+
+        void turnToPoint(vector2 target, double speed, bool waitForCompletion = true) {
+            LeftPID.targetPID = atan((target.y - position.y)/(target.x - position.x)) * WheelDistance;
+            LeftPID.maxSpeed = speed;
+            RightPID.targetPID = -atan(((target.y - position.y)/(target.x - position.x))) * WheelDistance;
+            RightPID.maxSpeed = speed;
+
+            if (waitForCompletion) {
+                do {
+                    pros::delay(1);
+                } while (LeftPID.pidActive && RightPID.pidActive);
+            }
+        }
+
+        void moveToPoint(vector2 target, double speed) {
+            turnToPoint(target, speed);
+            move(sqrt((target.y - position.y)+(target.x - position.x)), speed);
         }
 
     private:
+        void updateSensorReadings() {
+            currentLeftReading = (LeftEncoder->get_value()) * LeftEncoderScale;
+            currentRightReading = (RightEncoder->get_value()) * RightEncoderScale;
+            currentBackReading = (BackEncoder->get_value()) * BackEncoderScale;
+        }
+
         void updatePID(double kP, double kI, double kD) {
-            typedef struct pidVars  {
-                bool pidActive = false;
-                double pidError;
-                double pidDerivative;
-                double pidDrive;
-
-                double pidLastError = 0;
-                double pidIntegral = 0;
-
-                double targetPID;
-            } pidVars;
-            
-            pidVars LeftPID;
-            pidVars RightPID;
-
             while (true) {
                 if (LeftPID.pidActive) {
-                    int32_t avgEncoderReading = (currentLeftReading+currentRightReading) / 2;
-
-                    double error = avgEncoderReading - LeftPID.targetPID;
+                    double error = currentLeftReading - LeftPID.targetPID;
 
                     if (kI != 0) {
                         if( abs(error) < PID_INTEGRAL_LIMIT )
@@ -144,9 +198,7 @@ class Drivetrain {
                 }
 
                 if (RightPID.pidActive) {
-                    int32_t avgEncoderReading = (currentLeftReading+currentRightReading) / 2;
-
-                    double error = avgEncoderReading - RightPID.targetPID;
+                    double error = currentRightReading - RightPID.targetPID;
 
                     if (kI != 0) {
                         if( abs(error) < PID_INTEGRAL_LIMIT )
@@ -174,10 +226,6 @@ class Drivetrain {
         void updateOdometry() {
             // https://thepilons.ca/wp-content/uploads/2018/10/Tracking.pdf
 
-            currentLeftReading = (LeftEncoder -> get_value()) * LeftEncoderScale;
-            currentRightReading = (RightEncoder -> get_value()) * RightEncoderScale;
-            currentBackReading = (BackEncoder -> get_value()) * BackEncoderScale;
-
             double changeInLeft = currentLeftReading - oldLeftReading;
             double changeInRight = currentRightReading - oldRightReading;
             double changeInBack = currentBackReading - oldBackReading;
@@ -193,9 +241,16 @@ class Drivetrain {
             double r = sqrt(pow(x, 2.0) + pow(y, 2.0));
             double angle = atan2(y, x)-changeInOrientation;
 
-            position[0] += r*cos(angle);
-            position[1] += r*sin(angle);
+            position.x += r*cos(angle);
+            position.y += r*sin(angle);
 
             double averageOrientation = lastResetOrientation + (changeInOrientation/2);
+        }
+
+        void update() {
+            updateSensorReadings();
+
+            if (PIDActive) { updatePID(kP, kI, kD); }
+            if (OdometryActive) { updateOdometry(); }
         }
 };
