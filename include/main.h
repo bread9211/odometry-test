@@ -4,7 +4,7 @@
  * Contains common definitions and header files used throughout your PROS
  * project.
  *
- * Copyright (c) 2017-2021, Purdue University ACM SIGBots.
+ * \copyright Copyright (c) 2017-2023, Purdue University ACM SIGBots.
  * All rights reserved.
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
@@ -22,7 +22,7 @@
  *
  * For instance, E_CONTROLLER_MASTER has a shorter name: CONTROLLER_MASTER.
  * E_CONTROLLER_MASTER is pedantically correct within the PROS styleguide, but
- * not convienent for most student programmers.
+ * not convenient for most student programmers.
  */
 #define PROS_USE_SIMPLE_NAMES
 
@@ -36,17 +36,15 @@
 
 #include "api.h"
 
+#include "headers.hpp"
+#include "drive.hpp"
+#include "auton.hpp"
+
 /**
  * You should add more #includes here
  */
 //#include "okapi/api.hpp"
 //#include "pros/api_legacy.h"
-#include "EZ-Template/api.hpp"
-#include "autons.hpp"
-
-// More includes here...
-//
-// . . .
 
 /**
  * If you find doing pros::Motor() to be tedious and you'd prefer just to do
