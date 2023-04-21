@@ -1,5 +1,6 @@
 #include "main.h"
 
+#define PI 3.1415926535
 #define PID_INTEGRAL_LIMIT 50
 
 typedef struct pidVars  {
@@ -28,6 +29,7 @@ class Drivetrain {
         pros::MotorGroup* LeftMotors;
         pros::MotorGroup* RightMotors;
         double DriveGearRatio;
+        double WheelDiameter;
         double WheelDistance;
 
         // PID
@@ -42,14 +44,17 @@ class Drivetrain {
         pros::ADIEncoder* LeftEncoder;
         double LeftTrackingDistance;
         double LeftEncoderScale;
+        double LeftEncoderDiameter;
 
         pros::ADIEncoder* RightEncoder;
         double RightTrackingDistance;
         double RightEncoderScale;
+        double RightEncoderDiameter;
 
         pros::ADIEncoder* BackEncoder;
         double BackTrackingDistance;
         double BackEncoderScale;
+        double BackEncoderDiameter;
 
         vector2 position;
         double orientation;
@@ -73,6 +78,7 @@ class Drivetrain {
             pros::MotorGroup* LeftMotors,
             pros::MotorGroup* RightMotors,
             double DriveGearRatio,
+            double WheelDiameter,
             double WheelDistance,
             
             pros::ADIEncoder* LeftEncoder, 
@@ -84,6 +90,9 @@ class Drivetrain {
             double LeftEncoderScale, 
             double RightEncoderScale, 
             double BackEncoderScale,
+            double LeftEncoderDiameter,
+            double RightEncoderDiameter,
+            double BackEncoderDiameter,
             double StartOrientation
         ) {
             this -> LeftMotors = LeftMotors;
@@ -99,6 +108,9 @@ class Drivetrain {
             this -> LeftEncoderScale = LeftEncoderScale;
             this -> RightEncoderScale = RightEncoderScale;
             this -> BackEncoderScale = BackEncoderScale;
+            this -> LeftEncoderDiameter = LeftEncoderDiameter;
+            this -> RightEncoderDiameter = RightEncoderDiameter;
+            this -> BackEncoderDiameter = BackEncoderDiameter;
 
             this -> lastResetOrientation = StartOrientation;
             this -> orientation = StartOrientation;
@@ -121,9 +133,9 @@ class Drivetrain {
         }
 
         void move(double distance, double speed, bool waitForCompletion = true) {
-            LeftPID.targetPID = distance / DriveGearRatio;
+            LeftPID.targetPID += distance / DriveGearRatio;
             LeftPID.maxSpeed = speed;
-            RightPID.targetPID = distance / DriveGearRatio;
+            RightPID.targetPID += distance / DriveGearRatio;
             RightPID.maxSpeed = speed;
 
             if (waitForCompletion) {
@@ -134,9 +146,9 @@ class Drivetrain {
         }
 
         void turn(double angle, double speed, bool waitForCompletion = true) {
-            LeftPID.targetPID = sin(angle) * WheelDistance;
+            LeftPID.targetPID += sin(angle) * WheelDistance;
             LeftPID.maxSpeed = speed;
-            RightPID.targetPID = -sin(angle) * WheelDistance;
+            RightPID.targetPID += -sin(angle) * WheelDistance;
             RightPID.maxSpeed = speed;
 
             if (waitForCompletion) {
@@ -147,9 +159,9 @@ class Drivetrain {
         }
 
         void turnToPoint(vector2 target, double speed, bool waitForCompletion = true) {
-            LeftPID.targetPID = atan((target.y - position.y)/(target.x - position.x)) * WheelDistance;
+            LeftPID.targetPID += atan((target.y - position.y)/(target.x - position.x)) * WheelDistance;
             LeftPID.maxSpeed = speed;
-            RightPID.targetPID = -atan(((target.y - position.y)/(target.x - position.x))) * WheelDistance;
+            RightPID.targetPID += -atan(((target.y - position.y)/(target.x - position.x))) * WheelDistance;
             RightPID.maxSpeed = speed;
 
             if (waitForCompletion) {
@@ -226,9 +238,9 @@ class Drivetrain {
         void updateOdometry() {
             // https://thepilons.ca/wp-content/uploads/2018/10/Tracking.pdf
 
-            double changeInLeft = currentLeftReading - oldLeftReading;
-            double changeInRight = currentRightReading - oldRightReading;
-            double changeInBack = currentBackReading - oldBackReading;
+            double changeInLeft = ((currentLeftReading - oldLeftReading)/360)*LeftEncoderDiameter*PI;
+            double changeInRight = ((currentRightReading - oldRightReading)/360)*RightEncoderDiameter*PI;
+            double changeInBack = ((currentBackReading - oldBackReading)/360)*BackEncoderDiameter*PI;
 
             double changeInOrientation = (changeInLeft-changeInRight) / (LeftTrackingDistance+RightTrackingDistance);
             orientation += changeInOrientation;
@@ -244,7 +256,7 @@ class Drivetrain {
             position.x += r*cos(angle);
             position.y += r*sin(angle);
 
-            double averageOrientation = lastResetOrientation + (changeInOrientation/2);
+            // double averageOrientation = lastResetOrientation + (changeInOrientation/2);
         }
 
         void update() {

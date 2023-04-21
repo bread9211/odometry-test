@@ -28,7 +28,11 @@ void initialize() {
 
 	pros::lcd::register_btn1_cb(on_center_button);
 
-	
+	// Drivetrain chassis (
+	// 	pros::MotorGroup(std::vector<int8_t> {1, 2}),
+	// 	pros::MotorGroup(std::vector<int8_t> {3, 4}),
+	// 	1.5, 4.25, 10,
+	// )
 }
 
 /**

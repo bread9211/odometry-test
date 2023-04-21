@@ -73,6 +73,7 @@ class Drivetrain {
             pros::MotorGroup* LeftMotors,
             pros::MotorGroup* RightMotors,
             double DriveGearRatio,
+            double WheelDiameter,
             double WheelDistance,
             
             pros::ADIEncoder* LeftEncoder, 
@@ -84,6 +85,9 @@ class Drivetrain {
             double LeftEncoderScale, 
             double RightEncoderScale, 
             double BackEncoderScale,
+            double LeftEncoderDiameter,
+            double RightEncoderDiameter,
+            double BackEncoderDiameter,
             double StartOrientation
         ) {}
 
