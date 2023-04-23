@@ -1,7 +1,3 @@
-#include "main.h"
-
-#define PID_INTEGRAL_LIMIT 50
-
 typedef struct pidVars  {
     bool pidActive = true;
     double pidError;
@@ -42,14 +38,17 @@ class Drivetrain {
         pros::ADIEncoder* LeftEncoder;
         double LeftTrackingDistance;
         double LeftEncoderScale;
+        double LeftEncoderDiameter;
 
         pros::ADIEncoder* RightEncoder;
         double RightTrackingDistance;
         double RightEncoderScale;
+        double RightEncoderDiameter;
 
         pros::ADIEncoder* BackEncoder;
         double BackTrackingDistance;
         double BackEncoderScale;
+        double BackEncoderDiameter;
 
         vector2 position;
         double orientation;
