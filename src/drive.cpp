@@ -3,266 +3,193 @@
 #define PI 3.1415926535
 #define PID_INTEGRAL_LIMIT 50
 
-typedef struct pidVars  {
-    bool pidActive = true;
-    double pidError;
-    double pidDerivative;
-    double pidDrive;
+Drivetrain::Drivetrain(
+    pros::MotorGroup* LeftMotors,
+    pros::MotorGroup* RightMotors,
+    double DriveGearRatio,
+    double WheelDiameter,
+    double WheelDistance,
+    
+    pros::ADIEncoder* LeftEncoder, 
+    pros::ADIEncoder* RightEncoder, 
+    pros::ADIEncoder* BackEncoder, 
+    double LeftTrackingDistance,
+    double RightTrackingDistance,
+    double BackTrackingDistance,
+    double LeftEncoderScale, 
+    double RightEncoderScale, 
+    double BackEncoderScale,
+    double LeftEncoderDiameter,
+    double RightEncoderDiameter,
+    double BackEncoderDiameter,
+    double StartOrientation
+) {
+    this -> LeftMotors = LeftMotors;
+    this -> RightMotors = RightMotors;
+    this -> DriveGearRatio = DriveGearRatio;
+    this -> WheelDistance = WheelDistance;
+    this -> LeftEncoder = LeftEncoder;
+    this -> RightEncoder = RightEncoder;
+    this -> BackEncoder = BackEncoder;
+    this -> LeftTrackingDistance = LeftTrackingDistance;
+    this -> RightTrackingDistance = RightTrackingDistance;
+    this -> BackTrackingDistance = BackTrackingDistance;
+    this -> LeftEncoderScale = LeftEncoderScale;
+    this -> RightEncoderScale = RightEncoderScale;
+    this -> BackEncoderScale = BackEncoderScale;
+    this -> LeftEncoderDiameter = LeftEncoderDiameter;
+    this -> RightEncoderDiameter = RightEncoderDiameter;
+    this -> BackEncoderDiameter = BackEncoderDiameter;
 
-    double pidLastError = 0;
-    double pidIntegral = 0;
+    this -> lastResetOrientation = StartOrientation;
+    this -> orientation = StartOrientation;
 
-    double targetPID;
+    pros::Task SensorUpdateTask([this]() -> void {
+        this -> update();
+    }, "SensorUpdateTask");
+}
 
-    double maxSpeed = 127;
-} pidVars;
+void Drivetrain::initPID(double kP, double kI, double kD) {
+    this -> kP = kP;
+    this -> kI = kI;
+    this -> kP = kD;
 
-typedef struct vector2 {
-    double x = 0;
-    double y = 0;
-} vector2;
+    PIDActive = true;
+}
 
-class Drivetrain {
-    public:
-        // Drivetrain
+void Drivetrain::initOdometry() {
+    OdometryActive = true;
+}
 
-        pros::MotorGroup* LeftMotors;
-        pros::MotorGroup* RightMotors;
-        double DriveGearRatio;
-        double WheelDiameter;
-        double WheelDistance;
+void Drivetrain::move(double distance, double speed, bool waitForCompletion = true) {
+    LeftPID.targetPID += distance / DriveGearRatio;
+    LeftPID.maxSpeed = speed;
+    RightPID.targetPID += distance / DriveGearRatio;
+    RightPID.maxSpeed = speed;
 
-        // PID
-            
-        pidVars LeftPID;
-        pidVars RightPID;
+    if (waitForCompletion) {
+        do {
+            pros::delay(1);
+        } while (LeftPID.pidActive && RightPID.pidActive);
+    }
+}
 
-        double PIDSpeed;
+void Drivetrain::turn(double angle, double speed, bool waitForCompletion = true) {
+    LeftPID.targetPID += sin(angle) * WheelDistance;
+    LeftPID.maxSpeed = speed;
+    RightPID.targetPID += -sin(angle) * WheelDistance;
+    RightPID.maxSpeed = speed;
 
-        // Odometry
+    if (waitForCompletion) {
+        do {
+            pros::delay(1);
+        } while (LeftPID.pidActive && RightPID.pidActive);
+    }
+}
 
-        pros::ADIEncoder* LeftEncoder;
-        double LeftTrackingDistance;
-        double LeftEncoderScale;
-        double LeftEncoderDiameter;
+void Drivetrain::turnToPoint(vector2 target, double speed, bool waitForCompletion = true) {
+    LeftPID.targetPID += atan((target.y - position.y)/(target.x - position.x)) * WheelDistance;
+    LeftPID.maxSpeed = speed;
+    RightPID.targetPID += -atan(((target.y - position.y)/(target.x - position.x))) * WheelDistance;
+    RightPID.maxSpeed = speed;
 
-        pros::ADIEncoder* RightEncoder;
-        double RightTrackingDistance;
-        double RightEncoderScale;
-        double RightEncoderDiameter;
+    if (waitForCompletion) {
+        do {
+            pros::delay(1);
+        } while (LeftPID.pidActive && RightPID.pidActive);
+    }
+}
 
-        pros::ADIEncoder* BackEncoder;
-        double BackTrackingDistance;
-        double BackEncoderScale;
-        double BackEncoderDiameter;
+void Drivetrain::moveToPoint(vector2 target, double speed) {
+    turnToPoint(target, speed);
+    move(sqrt((target.y - position.y)+(target.x - position.x)), speed);
+}
 
-        vector2 position;
-        double orientation;
+void Drivetrain::updateSensorReadings() {
+    currentLeftReading = (LeftEncoder->get_value()) * LeftEncoderScale;
+    currentRightReading = (RightEncoder->get_value()) * RightEncoderScale;
+    currentBackReading = (BackEncoder->get_value()) * BackEncoderScale;
+}
 
-        int32_t oldLeftReading;
-        int32_t oldRightReading;
-        int32_t oldBackReading;
+void Drivetrain::updatePID(double kP, double kI, double kD) {
+    while (true) {
+        if (LeftPID.pidActive) {
+            double error = currentLeftReading - LeftPID.targetPID;
 
-        int32_t currentLeftReading;
-        int32_t currentRightReading;
-        int32_t currentBackReading;
+            if (kI != 0) {
+                if( abs(error) < PID_INTEGRAL_LIMIT )
+                    LeftPID.pidIntegral += error;
+                else
+                    LeftPID.pidIntegral = 0;
+            } else 
+                LeftPID.pidIntegral = 0;
 
-        double lastResetOrientation;
+            LeftPID.pidDerivative = LeftPID.pidError - LeftPID.pidLastError;
+            LeftPID.pidLastError  = LeftPID.pidError;
 
-        bool PIDActive = false;
-        double kP, kI, kD;
+            LeftPID.pidDrive = (kP * LeftPID.pidError) + (kI * LeftPID.pidIntegral) + (kD * LeftPID.pidDerivative);
 
-        bool OdometryActive = false;
+            if (LeftPID.pidDrive > 127)
+                LeftPID.pidDrive = 127;
+            if (LeftPID.pidDrive < -127)
+                LeftPID.pidDrive = -127;
 
-        Drivetrain(
-            pros::MotorGroup* LeftMotors,
-            pros::MotorGroup* RightMotors,
-            double DriveGearRatio,
-            double WheelDiameter,
-            double WheelDistance,
-            
-            pros::ADIEncoder* LeftEncoder, 
-            pros::ADIEncoder* RightEncoder, 
-            pros::ADIEncoder* BackEncoder, 
-            double LeftTrackingDistance,
-            double RightTrackingDistance,
-            double BackTrackingDistance,
-            double LeftEncoderScale, 
-            double RightEncoderScale, 
-            double BackEncoderScale,
-            double LeftEncoderDiameter,
-            double RightEncoderDiameter,
-            double BackEncoderDiameter,
-            double StartOrientation
-        ) {
-            this -> LeftMotors = LeftMotors;
-            this -> RightMotors = RightMotors;
-            this -> DriveGearRatio = DriveGearRatio;
-            this -> WheelDistance = WheelDistance;
-            this -> LeftEncoder = LeftEncoder;
-            this -> RightEncoder = RightEncoder;
-            this -> BackEncoder = BackEncoder;
-            this -> LeftTrackingDistance = LeftTrackingDistance;
-            this -> RightTrackingDistance = RightTrackingDistance;
-            this -> BackTrackingDistance = BackTrackingDistance;
-            this -> LeftEncoderScale = LeftEncoderScale;
-            this -> RightEncoderScale = RightEncoderScale;
-            this -> BackEncoderScale = BackEncoderScale;
-            this -> LeftEncoderDiameter = LeftEncoderDiameter;
-            this -> RightEncoderDiameter = RightEncoderDiameter;
-            this -> BackEncoderDiameter = BackEncoderDiameter;
-
-            this -> lastResetOrientation = StartOrientation;
-            this -> orientation = StartOrientation;
-
-            pros::Task SensorUpdateTask([this]() -> void {
-                this -> update();
-            }, "SensorUpdateTask");
+            LeftMotors->move(LeftPID.pidDrive);
         }
 
-        void initPID(double kP, double kI, double kD) {
-            this -> kP = kP;
-            this -> kI = kI;
-            this -> kP = kD;
+        if (RightPID.pidActive) {
+            double error = currentRightReading - RightPID.targetPID;
 
-            PIDActive = true;
+            if (kI != 0) {
+                if( abs(error) < PID_INTEGRAL_LIMIT )
+                    RightPID.pidIntegral += error;
+                else
+                    RightPID.pidIntegral = 0;
+            } else 
+                RightPID.pidIntegral = 0;
+
+            RightPID.pidDerivative = RightPID.pidError - RightPID.pidLastError;
+            RightPID.pidLastError  = RightPID.pidError;
+
+            RightPID.pidDrive = (kP * RightPID.pidError) + (kI * RightPID.pidIntegral) + (kD * RightPID.pidDerivative);
+
+            if (RightPID.pidDrive > 127)
+                RightPID.pidDrive = 127;
+            if (RightPID.pidDrive < -127)
+                RightPID.pidDrive = -127;
+
+            RightMotors->move(RightPID.pidDrive);
         }
+    }
+}
 
-        void initOdometry() {
-            OdometryActive = true;
-        }
+void Drivetrain::updateOdometry() {
+    // https://thepilons.ca/wp-content/uploads/2018/10/Tracking.pdf
 
-        void move(double distance, double speed, bool waitForCompletion = true) {
-            LeftPID.targetPID += distance / DriveGearRatio;
-            LeftPID.maxSpeed = speed;
-            RightPID.targetPID += distance / DriveGearRatio;
-            RightPID.maxSpeed = speed;
+    double changeInLeft = ((currentLeftReading - oldLeftReading)/360)*LeftEncoderDiameter*PI;
+    double changeInRight = ((currentRightReading - oldRightReading)/360)*RightEncoderDiameter*PI;
+    double changeInBack = ((currentBackReading - oldBackReading)/360)*BackEncoderDiameter*PI;
 
-            if (waitForCompletion) {
-                do {
-                    pros::delay(1);
-                } while (LeftPID.pidActive && RightPID.pidActive);
-            }
-        }
+    double changeInOrientation = (changeInLeft-changeInRight) / (LeftTrackingDistance+RightTrackingDistance);
+    orientation += changeInOrientation;
 
-        void turn(double angle, double speed, bool waitForCompletion = true) {
-            LeftPID.targetPID += sin(angle) * WheelDistance;
-            LeftPID.maxSpeed = speed;
-            RightPID.targetPID += -sin(angle) * WheelDistance;
-            RightPID.maxSpeed = speed;
+    double radius = changeInRight/changeInOrientation + RightTrackingDistance;
+    double arcChordLength = 2 * sin(changeInOrientation/2);
 
-            if (waitForCompletion) {
-                do {
-                    pros::delay(1);
-                } while (LeftPID.pidActive && RightPID.pidActive);
-            }
-        }
+    double x = arcChordLength * changeInBack / changeInOrientation + BackTrackingDistance;
+    double y = arcChordLength * changeInRight / changeInOrientation + RightTrackingDistance;
+    double r = sqrt(pow(x, 2.0) + pow(y, 2.0));
+    double angle = atan2(y, x)-changeInOrientation;
 
-        void turnToPoint(vector2 target, double speed, bool waitForCompletion = true) {
-            LeftPID.targetPID += atan((target.y - position.y)/(target.x - position.x)) * WheelDistance;
-            LeftPID.maxSpeed = speed;
-            RightPID.targetPID += -atan(((target.y - position.y)/(target.x - position.x))) * WheelDistance;
-            RightPID.maxSpeed = speed;
+    position.x += r*cos(angle);
+    position.y += r*sin(angle);
 
-            if (waitForCompletion) {
-                do {
-                    pros::delay(1);
-                } while (LeftPID.pidActive && RightPID.pidActive);
-            }
-        }
+    // double averageOrientation = lastResetOrientation + (changeInOrientation/2);
+}
 
-        void moveToPoint(vector2 target, double speed) {
-            turnToPoint(target, speed);
-            move(sqrt((target.y - position.y)+(target.x - position.x)), speed);
-        }
+void Drivetrain::update() {
+    updateSensorReadings();
 
-    private:
-        void updateSensorReadings() {
-            currentLeftReading = (LeftEncoder->get_value()) * LeftEncoderScale;
-            currentRightReading = (RightEncoder->get_value()) * RightEncoderScale;
-            currentBackReading = (BackEncoder->get_value()) * BackEncoderScale;
-        }
-
-        void updatePID(double kP, double kI, double kD) {
-            while (true) {
-                if (LeftPID.pidActive) {
-                    double error = currentLeftReading - LeftPID.targetPID;
-
-                    if (kI != 0) {
-                        if( abs(error) < PID_INTEGRAL_LIMIT )
-                            LeftPID.pidIntegral += error;
-                        else
-                            LeftPID.pidIntegral = 0;
-                    } else 
-                        LeftPID.pidIntegral = 0;
-
-                    LeftPID.pidDerivative = LeftPID.pidError - LeftPID.pidLastError;
-                    LeftPID.pidLastError  = LeftPID.pidError;
-
-                    LeftPID.pidDrive = (kP * LeftPID.pidError) + (kI * LeftPID.pidIntegral) + (kD * LeftPID.pidDerivative);
-
-                    if (LeftPID.pidDrive > 127)
-                        LeftPID.pidDrive = 127;
-                    if (LeftPID.pidDrive < -127)
-                        LeftPID.pidDrive = -127;
-
-                    LeftMotors->move(LeftPID.pidDrive);
-                }
-
-                if (RightPID.pidActive) {
-                    double error = currentRightReading - RightPID.targetPID;
-
-                    if (kI != 0) {
-                        if( abs(error) < PID_INTEGRAL_LIMIT )
-                            RightPID.pidIntegral += error;
-                        else
-                            RightPID.pidIntegral = 0;
-                    } else 
-                        RightPID.pidIntegral = 0;
-
-                    RightPID.pidDerivative = RightPID.pidError - RightPID.pidLastError;
-                    RightPID.pidLastError  = RightPID.pidError;
-
-                    RightPID.pidDrive = (kP * RightPID.pidError) + (kI * RightPID.pidIntegral) + (kD * RightPID.pidDerivative);
-
-                    if (RightPID.pidDrive > 127)
-                        RightPID.pidDrive = 127;
-                    if (RightPID.pidDrive < -127)
-                        RightPID.pidDrive = -127;
-
-                    RightMotors->move(RightPID.pidDrive);
-                }
-            }
-        }
-
-        void updateOdometry() {
-            // https://thepilons.ca/wp-content/uploads/2018/10/Tracking.pdf
-
-            double changeInLeft = ((currentLeftReading - oldLeftReading)/360)*LeftEncoderDiameter*PI;
-            double changeInRight = ((currentRightReading - oldRightReading)/360)*RightEncoderDiameter*PI;
-            double changeInBack = ((currentBackReading - oldBackReading)/360)*BackEncoderDiameter*PI;
-
-            double changeInOrientation = (changeInLeft-changeInRight) / (LeftTrackingDistance+RightTrackingDistance);
-            orientation += changeInOrientation;
-
-            double radius = changeInRight/changeInOrientation + RightTrackingDistance;
-            double arcChordLength = 2 * sin(changeInOrientation/2);
-
-            double x = arcChordLength * changeInBack / changeInOrientation + BackTrackingDistance;
-            double y = arcChordLength * changeInRight / changeInOrientation + RightTrackingDistance;
-            double r = sqrt(pow(x, 2.0) + pow(y, 2.0));
-            double angle = atan2(y, x)-changeInOrientation;
-
-            position.x += r*cos(angle);
-            position.y += r*sin(angle);
-
-            // double averageOrientation = lastResetOrientation + (changeInOrientation/2);
-        }
-
-        void update() {
-            updateSensorReadings();
-
-            if (PIDActive) { updatePID(kP, kI, kD); }
-            if (OdometryActive) { updateOdometry(); }
-        }
-};
+    if (PIDActive) { updatePID(kP, kI, kD); }
+    if (OdometryActive) { updateOdometry(); }
+}
